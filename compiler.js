@@ -311,6 +311,7 @@ export default class TerminfoCompiler {
 			// other_insn must be set at this point;
 			// the regex doesn't match invalid instructions at all and will ignore them
 			switch (insn.groups.other_insn) {
+				case "%": result.push(genOut("%")); break;
 				case "l": result.push(genOpcode(Opcode.STRLEN)); break;
 				case "i": result.push(genOpcode(Opcode.PARAM_INC)); break;
 				// math
