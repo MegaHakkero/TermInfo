@@ -59,7 +59,8 @@ const INSN_REGEX = new RegExp([
 	].join(""),
 	// instruction -> printf
 	[
-		"%(((?<print_flags>((?<_pf>[-:+# ])(?!\\k<_pf>))*)",
+		// the first char must be ":" if you want to use + or - without other flags
+		"%(((?<print_flags>(?<_pf1>[:# ])?(?:(?<_pf2>[-+# ])(?!\\k<_pf1>|\\k<_pf2>))*)",
 		"(?:(?<print_width>[0-9]+)(?:\\.(?<print_precision>[0-9]+))?)?",
 		"(?<print_format>[cdoxXs]))",
 	].join(""),
