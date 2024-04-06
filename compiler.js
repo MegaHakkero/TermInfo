@@ -67,7 +67,8 @@ const INSN_REGEX = new RegExp([
 	"(?:p(?<push_param>[0-9]))",
 	// push or get variable
 	"(?<var_op>[Pg][a-zA-Z])",
-	"(\\'(?<character>.)\\')",
+	// single char (collects escapes and control characters)
+	"(\\'(?<character>(?:\\^.)|(?:\\\\(?:[\\\\\\']|[^\\\\\\']+))|[^\\\\\\'])\\')",
 	"(\\{(?<integer>[0-9]+)\\})",
 	// single-character instructions -> end instruction
 	"(?<other_insn>[ilmAO?te;%+*/&|^=><!~-]))"
@@ -155,10 +156,30 @@ class Instruction {
 	}
 }
 
+function handleEscapes(s) {
+	return s
+		.replace(/\^(.)/g, (_, m) =>
+			String.fromCharCode(m === "?" ? 0x7F : m.charCodeAt(0) & 0x1F))
+		.replace(/\\(\d{1,3})/g, (_, m) =>
+			String.fromCharCode(parseInt(m, 8)))
+		.replace(/\\[Ee]/g, String.fromCharCode(0x1B))
+		.replace(/\\n/g,  "\r\n")
+		.replace(/\\l/g,  "\n")
+		.replace(/\\r/g,  "\r")
+		.replace(/\\t/g,  "\t")
+		.replace(/\\b/g,  "\b")
+		.replace(/\\f/g,  "\f")
+		.replace(/\\s/g,  " ")
+		.replace(/\\^/g,  "^")
+		.replace(/\\\\/g, "\\")
+		.replace(/\\,/g,  ",")
+		.replace(/\\:/g,  ":");
+}
+
 function genOut(s) {
 	const insn = new Instruction(Opcode.OUT);
 
-	insn.str = s;
+	insn.str = handleEscapes(s);
 
 	return insn.freeze();
 }
@@ -265,7 +286,7 @@ function inverseMatch(s, matches) {
 export default class TerminfoCompiler {
 	// convert raw terminfo string to a list of instructions.
 	// they are not to be executed directly, and need post-processing
-	// with respect to control flow instructions and escapes
+	// with respect to control flow instructions
 	static generateInstructions(s) {
 		const instructions = [...s.matchAll(INSN_REGEX)].map(e => ({
 			match: e[0],
@@ -300,7 +321,10 @@ export default class TerminfoCompiler {
 				continue;
 			}
 			if (insn.groups.character !== undefined) {
-				result.push(genConstant(insn.groups.character.charCodeAt(0)));
+				const e = handleEscapes(insn.groups.character);
+				if (e.length > 1)
+					throw new TypeError(`invalid character instruction %'${insn.groups.character}'`);
+				result.push(genConstant(e.charCodeAt(0)));
 				continue;
 			}
 			if (insn.groups.integer !== undefined) {
