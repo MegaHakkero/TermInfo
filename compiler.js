@@ -68,7 +68,7 @@ const INSN_REGEX = new RegExp([
 	// push or get variable
 	"(?<var_op>[Pg][a-zA-Z])",
 	// single char (collects escapes and control characters)
-	"(\\'(?<character>(?:\\^.)|(?:\\\\(?:[\\\\\\']|[^\\\\\\']+))|[^\\\\\\'])\\')",
+	/(\'(?<character>(?:\^.)|(?:\\(?:[\\\']|[^\\\']+))|[^\\\'])\')/.source,
 	"(\\{(?<integer>[0-9]+)\\})",
 	// single-character instructions -> end instruction
 	"(?<other_insn>[ilmAO?te;%+*/&|^=><!~-]))"
