@@ -15,9 +15,21 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-export class FormatError extends Error {
+class FormatError extends Error {
 	constructor() {
 		super(...arguments);
 		this.name = "FormatError";
 	}
 }
+
+class UninitializedError extends Error {
+	constructor() {
+		super(...arguments);
+		this.name = "UninitializedError";
+	}
+}
+
+const Errors = { FormatError, UninitializedError };
+Object.freeze(Errors);
+
+export default Errors;

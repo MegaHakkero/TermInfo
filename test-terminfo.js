@@ -17,18 +17,6 @@
 
 import TermInfo from "./terminfo.js";
 
-function getAllTerminals(db) {
-	if (Deno.statSync(db).isFile)
-		return [db];
-
-	const stuff = [];
-
-	for (const entry of Deno.readDirSync(db))
-		stuff.push(...getAllTerminals(db + "/" + entry.name));
-
-	return stuff;
-}
-
 Deno.test({
 	name: "Parse all terminals",
 	permissions: {
@@ -36,12 +24,35 @@ Deno.test({
 		read: true
 	},
 	fn() {
-		for (const term of getAllTerminals("/usr/share/terminfo")) {
-			Deno.stdout.writeSync(new TextEncoder().encode(term + "... "));
-			const ti = new TermInfo(term);
-			console.log("OK '" + ti.names.detailed + "';" +
-				(ti.header.magic.is("MAGIC_32") ? " 32-bit" : "") +
-				((ti.extHeader !== undefined) ? " extended" : ""));
+		const db = new TermInfo.DB("/usr/share/terminfo");
+		let n = 0, n32bit = 0, nExt = 0;
+
+		for (const term of Object.keys(db.entries)) {
+			const ti = db.load(term);
+			if (ti.is32bit())
+				n32bit++;
+			if (ti.isExtended())
+				nExt++;
+			Deno.stdout.writeSync(new TextEncoder().encode(
+				`${++n} terminals OK (32bit=${n32bit}, ext=${nExt})\r`));
+		}
+
+		console.log("");
+	}
+});
+
+Deno.test({
+	name: "Test for duplicates in TermInfo.DB",
+	permissions: {
+		read: true
+	},
+	fn() {
+		const db   = new TermInfo.DB("/usr/share/terminfo");
+		const keys = Object.keys(db.entries);
+		for (const term of keys) {
+			const nEntries = keys.filter(n => n === term).length;
+			if (nEntries > 1)
+				throw new RangeError(`found ${nEntries} entries for ${term}`);
 		}
 	}
 });

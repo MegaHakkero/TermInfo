@@ -43,10 +43,10 @@ const Opcode = Enum(
 	"CMP_AND",
 	"CMP_OR",
 	"CMP_NOT",
-	"BEGIN_IF",
-	"THEN",
-	"ELSE_IF",
-	"END_IF"
+	"CURSES_BEGIN_IF",
+	"CURSES_THEN",
+	"CURSES_ELSE_IF",
+	"CURSES_END_IF"
 );
 
 // being able to do things like this is most of the reason
@@ -356,10 +356,10 @@ export default class TerminfoCompiler {
 				case "O": result.push(genOpcode(Opcode.CMP_OR)); break;
 				case "!": result.push(genOpcode(Opcode.CMP_NOT)); break;
 				// control flow
-				case "?": result.push(genOpcode(Opcode.BEGIN_IF)); break;
-				case "t": result.push(genOpcode(Opcode.THEN)); break;
-				case "e": result.push(genOpcode(Opcode.ELSE_IF)); break;
-				case ";": result.push(genOpcode(Opcode.END_IF)); break;
+				case "?": result.push(genOpcode(Opcode.CURSES_BEGIN_IF)); break;
+				case "t": result.push(genOpcode(Opcode.CURSES_THEN)); break;
+				case "e": result.push(genOpcode(Opcode.CURSES_ELSE_IF)); break;
+				case ";": result.push(genOpcode(Opcode.CURSES_END_IF)); break;
 			}
 		}
 

@@ -17,7 +17,7 @@
 
 import Enum from "./enum.js";
 import Caps from "./caps.js";
-import * as Errors from "./errors.js";
+import Errors from "./errors.js";
 
 const Magic = Enum(
 	["MAGIC",    0x011A],
@@ -62,7 +62,53 @@ class TermName {
 	}
 }
 
-export default class TermInfo {
+// exports
+class DB {
+	#populate() {
+		const db = ([...arguments].length < 1) ? this.path : arguments[0];
+		// if arguments[0] is defined, then arguments[1] must also be defined
+		const n  = ([...arguments].length < 1) ? undefined : arguments[1];
+
+		if (Deno.statSync(db).isFile) {
+			this.entries[n] = db;
+			return;
+		}
+	
+		for (const entry of Deno.readDirSync(db))
+			this.#populate(db + "/" + entry.name, entry.name);
+	}
+
+	constructor(path) {
+		if (!Deno.statSync(path).isDirectory)
+			throw new TypeError("not a directory: " + path);
+
+		this.path    = path;
+		this.entries = {};
+
+		this.#populate();
+	}
+
+	load(name) {
+		if (Object.keys(this.entries).length < 1)
+			throw new Errors.UninitializedError("Database not loaded");
+		
+		if (this.entries[name] === undefined)
+			throw new TypeError(`Entry '${name}' does not exist in this database`);
+
+		return new Entry(this.entries[name]);
+	}
+
+	loadDefault(fallback) {
+		let t = Deno.env.get("TERM");
+		if (t === undefined && fallback === undefined)
+			throw new TypeError("$TERM is undefined and no fallback was provided");
+		else if (t === undefined)
+			t = fallback;
+		return this.load(t);
+	}
+}
+
+class Entry {
 	#file;
 	#numWidth;
 
@@ -348,4 +394,17 @@ export default class TermInfo {
 
 		this.#file.close();
 	}
+
+	is32bit() {
+		return this.header.magic.is("MAGIC_32");
+	}
+
+	isExtended() {
+		return this.extHeader !== undefined;
+	}
 }
+
+const TermInfo = { DB, Entry };
+Object.freeze(TermInfo);
+
+export default TermInfo;
