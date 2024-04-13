@@ -43,10 +43,14 @@ const Opcode = Enum(
 	"CMP_AND",
 	"CMP_OR",
 	"CMP_NOT",
+	// flow control markers. not present in compiled instructions
 	"CURSES_BEGIN_IF",
 	"CURSES_THEN",
 	"CURSES_ELSE_IF",
-	"CURSES_END_IF"
+	"CURSES_END_IF",
+	// actual flow control instructions
+	"JUMP_ZERO",
+	"JUMP"
 );
 
 // being able to do things like this is most of the reason
@@ -105,6 +109,12 @@ class Instruction {
 		},
 		[Opcode.CONSTANT]: {
 			value: 0 // use charCodeAt for character constants
+		},
+		[Opcode.JUMP_ZERO]: {
+			position: 0
+		},
+		[Opcode.JUMP]: {
+			position: 0
 		}
 	};
 	
@@ -119,7 +129,7 @@ class Instruction {
 
 		switch (this.opcode.value) {
 			case Opcode.OUT:
-				result.push(this.str);
+				result.push(Deno.inspect(this.str));
 				break;
 			case Opcode.DELAY:
 				result.push(String(this.time) +
@@ -146,6 +156,9 @@ class Instruction {
 			case Opcode.CONSTANT:
 				result.push(String(this.value));
 				break;
+			case Opcode.JUMP_ZERO:
+			case Opcode.JUMP:
+				result.push(String(this.position));
 		}
 
 		return result.join(" ");
@@ -283,10 +296,78 @@ function inverseMatch(s, matches) {
 	return result.filter(m => (m.match.length > 0));
 }
 
+// convert flow control instructions to relative jumps
+function convertFC(instructions) {
+	const result = [], endJumpIndices = [];
+	// endJumpPos being not const nags at me, but javascript
+	// has no in-place map. I thought about writing my own but
+	// that would just cost performance :\
+	let endJumpPos = [],
+		chainJumpIndex, chainJumpPos = 0, i = 0;
+
+	for (; i < instructions.length; i++) {
+		const insn = instructions[i];
+		switch (insn.opcode.value) {
+			case Opcode.CURSES_BEGIN_IF: {
+				const [skip, block] = convertFC(instructions.slice(i + 1));
+				if (block === undefined)
+					throw new Errors.ParseError("unexpected end of instructions");
+
+				result.push(...block);
+				chainJumpPos += block.length;
+				endJumpPos = endJumpPos.map(pos => pos + block.length);
+				i += skip;
+				break;
+			}
+			case Opcode.CURSES_THEN:
+				result.push(new Instruction(Opcode.JUMP_ZERO));
+				chainJumpPos = 0;
+				chainJumpIndex = result.length - 1;
+				endJumpPos = endJumpPos.map(pos => pos + 1);
+				break;
+			case Opcode.CURSES_ELSE_IF:
+				result[chainJumpIndex].position = chainJumpPos + 1;
+				result[chainJumpIndex].freeze();
+				chainJumpIndex = undefined; // protect against errors in the next case
+
+				// these jumps target the end of the if block.
+				// executed at the end of a conditional block between %t and %e slash %;
+				// they're resolved collectively at the end of the block
+				result.push(new Instruction(Opcode.JUMP));
+				endJumpPos = endJumpPos.map(pos => pos + 1);
+				endJumpPos.push(0);
+				endJumpIndices.push(result.length - 1);
+				break;
+			case Opcode.CURSES_END_IF:
+				if (chainJumpIndex !== undefined) {
+					// no +1, because no extra jump instruction is generated here
+					result[chainJumpIndex].position = chainJumpPos;
+					result[chainJumpIndex].freeze();
+				}
+
+				if (endJumpIndices.length > 0) {
+					for (let j = 0; j < endJumpIndices.length; j++) {
+						result[endJumpIndices[j]].position = endJumpPos[j];
+						result[endJumpIndices[j]].freeze();
+					}
+				}
+
+				// NOTE to self: if this function returns this array to you,
+				// you should report a parse error
+				return [i + 1, result];
+			default:
+				chainJumpPos++;
+				endJumpPos = endJumpPos.map(pos => pos + 1);
+				result.push(insn);
+		}
+	}
+
+	return result;
+}
+
 export default class TerminfoCompiler {
 	// convert raw terminfo string to a list of instructions.
-	// they are not to be executed directly, and need post-processing
-	// with respect to control flow instructions
+	// they are not to be executed directly
 	static generateInstructions(s) {
 		const instructions = [...s.matchAll(INSN_REGEX)].map(e => ({
 			match: e[0],
@@ -297,72 +378,72 @@ export default class TerminfoCompiler {
 		const all = instructions.concat(inverseMatch(s, instructions))
 			.sort((a, b) => a.index - b.index);
 
-		const result = [];
+		const rawResult = [];
 		
 		for (const insn of all) {
 			if (insn.groups === undefined) {
-				result.push(genOut(insn.match));
+				rawResult.push(genOut(insn.match));
 				continue;
 			}
 			if (insn.groups.delay_time !== undefined) {
-				result.push(genDelay(insn.groups));
+				rawResult.push(genDelay(insn.groups));
 				continue;
 			}
 			if (insn.groups.print_format !== undefined) {
-				result.push(genPrint(insn.groups));
+				rawResult.push(genPrint(insn.groups));
 				continue;
 			}
 			if (insn.groups.push_param !== undefined) {
-				result.push(genParam(insn.groups));
+				rawResult.push(genParam(insn.groups));
 				continue;
 			}
 			if (insn.groups.var_op !== undefined) {
-				result.push(genVar(insn.groups));
+				rawResult.push(genVar(insn.groups));
 				continue;
 			}
 			if (insn.groups.character !== undefined) {
 				const e = handleEscapes(insn.groups.character);
 				if (e.length > 1)
 					throw new TypeError(`invalid character instruction %'${insn.groups.character}'`);
-				result.push(genConstant(e.charCodeAt(0)));
+				rawResult.push(genConstant(e.charCodeAt(0)));
 				continue;
 			}
 			if (insn.groups.integer !== undefined) {
-				result.push(genConstant(Number(insn.groups.integer)));
+				rawResult.push(genConstant(Number(insn.groups.integer)));
 				continue;
 			}
 
 			// other_insn must be set at this point;
 			// the regex doesn't match invalid instructions at all and will ignore them
 			switch (insn.groups.other_insn) {
-				case "%": result.push(genOut("%")); break;
-				case "l": result.push(genOpcode(Opcode.STRLEN)); break;
-				case "i": result.push(genOpcode(Opcode.PARAM_INC)); break;
+				case "%": rawResult.push(genOut("%")); break;
+				case "l": rawResult.push(genOpcode(Opcode.STRLEN)); break;
+				case "i": rawResult.push(genOpcode(Opcode.PARAM_INC)); break;
 				// math
-				case "+": result.push(genOpcode(Opcode.ADD)); break;
-				case "-": result.push(genOpcode(Opcode.SUBTRACT)); break;
-				case "*": result.push(genOpcode(Opcode.MULTIPLY)); break;
-				case "/": result.push(genOpcode(Opcode.DIVIDE)); break;
-				case "m": result.push(genOpcode(Opcode.MODULO)); break;
-				case "&": result.push(genOpcode(Opcode.AND)); break;
-				case "|": result.push(genOpcode(Opcode.OR)); break;
-				case "^": result.push(genOpcode(Opcode.XOR)); break;
-				case "~": result.push(genOpcode(Opcode.NOT)); break;
+				case "+": rawResult.push(genOpcode(Opcode.ADD)); break;
+				case "-": rawResult.push(genOpcode(Opcode.SUBTRACT)); break;
+				case "*": rawResult.push(genOpcode(Opcode.MULTIPLY)); break;
+				case "/": rawResult.push(genOpcode(Opcode.DIVIDE)); break;
+				case "m": rawResult.push(genOpcode(Opcode.MODULO)); break;
+				case "&": rawResult.push(genOpcode(Opcode.AND)); break;
+				case "|": rawResult.push(genOpcode(Opcode.OR)); break;
+				case "^": rawResult.push(genOpcode(Opcode.XOR)); break;
+				case "~": rawResult.push(genOpcode(Opcode.NOT)); break;
 				// logical operators
-				case "=": result.push(genOpcode(Opcode.CMP_EQUAL)); break;
-				case ">": result.push(genOpcode(Opcode.CMP_GREATER)); break;
-				case "<": result.push(genOpcode(Opcode.CMP_LESS)); break;
-				case "A": result.push(genOpcode(Opcode.CMP_AND)); break;
-				case "O": result.push(genOpcode(Opcode.CMP_OR)); break;
-				case "!": result.push(genOpcode(Opcode.CMP_NOT)); break;
-				// control flow
-				case "?": result.push(genOpcode(Opcode.CURSES_BEGIN_IF)); break;
-				case "t": result.push(genOpcode(Opcode.CURSES_THEN)); break;
-				case "e": result.push(genOpcode(Opcode.CURSES_ELSE_IF)); break;
-				case ";": result.push(genOpcode(Opcode.CURSES_END_IF)); break;
+				case "=": rawResult.push(genOpcode(Opcode.CMP_EQUAL)); break;
+				case ">": rawResult.push(genOpcode(Opcode.CMP_GREATER)); break;
+				case "<": rawResult.push(genOpcode(Opcode.CMP_LESS)); break;
+				case "A": rawResult.push(genOpcode(Opcode.CMP_AND)); break;
+				case "O": rawResult.push(genOpcode(Opcode.CMP_OR)); break;
+				case "!": rawResult.push(genOpcode(Opcode.CMP_NOT)); break;
+				// flow control markers
+				case "?": rawResult.push(genOpcode(Opcode.CURSES_BEGIN_IF)); break;
+				case "t": rawResult.push(genOpcode(Opcode.CURSES_THEN)); break;
+				case "e": rawResult.push(genOpcode(Opcode.CURSES_ELSE_IF)); break;
+				case ";": rawResult.push(genOpcode(Opcode.CURSES_END_IF)); break;
 			}
 		}
 
-		return result;
+		return convertFC(rawResult);
 	}
 }

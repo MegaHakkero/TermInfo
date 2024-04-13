@@ -29,7 +29,14 @@ class UninitializedError extends Error {
 	}
 }
 
-const Errors = { FormatError, UninitializedError };
+class ParseError extends Error {
+	constructor() {
+		super(...arguments);
+		this.name = "ParseError";
+	}
+}
+
+const Errors = { FormatError, UninitializedError, ParseError };
 Object.freeze(Errors);
 
 export default Errors;
