@@ -44,10 +44,10 @@ const Opcode = Enum(
 	"CMP_OR",
 	"CMP_NOT",
 	// flow control markers. not present in compiled instructions
-	"CURSES_BEGIN_IF",
-	"CURSES_THEN",
-	"CURSES_ELSE_IF",
-	"CURSES_END_IF",
+	"TI_FLOW_BEGIN_IF",
+	"TI_FLOW_THEN",
+	"TI_FLOW_ELSE_IF",
+	"TI_FLOW_END_IF",
 	// actual flow control instructions
 	"JUMP_ZERO",
 	"JUMP"
@@ -302,13 +302,12 @@ function convertFC(instructions) {
 	// endJumpPos being not const nags at me, but javascript
 	// has no in-place map. I thought about writing my own but
 	// that would just cost performance :\
-	let endJumpPos = [],
-		chainJumpIndex, chainJumpPos = 0, i = 0;
+	let i = 0, endJumpPos = [], chainJumpIndex, chainJumpPos = 0;
 
 	for (; i < instructions.length; i++) {
 		const insn = instructions[i];
 		switch (insn.opcode.value) {
-			case Opcode.CURSES_BEGIN_IF: {
+			case Opcode.TI_FLOW_BEGIN_IF: {
 				const [skip, block] = convertFC(instructions.slice(i + 1));
 				if (block === undefined)
 					throw new Errors.ParseError("unexpected end of instructions");
@@ -319,26 +318,27 @@ function convertFC(instructions) {
 				i += skip;
 				break;
 			}
-			case Opcode.CURSES_THEN:
+			case Opcode.TI_FLOW_THEN:
 				result.push(new Instruction(Opcode.JUMP_ZERO));
 				chainJumpPos = 0;
 				chainJumpIndex = result.length - 1;
 				endJumpPos = endJumpPos.map(pos => pos + 1);
 				break;
-			case Opcode.CURSES_ELSE_IF:
+			case Opcode.TI_FLOW_ELSE_IF:
 				result[chainJumpIndex].position = chainJumpPos + 1;
 				result[chainJumpIndex].freeze();
 				chainJumpIndex = undefined; // protect against errors in the next case
 
-				// these jumps target the end of the if block.
-				// executed at the end of a conditional block between %t and %e slash %;
-				// they're resolved collectively at the end of the block
+				// these jumps target the end of the if construct.
+				// executed at the end of a non-terminal conditional block between
+				// %t and %e slash %;, they're resolved collectively at the end of the
+				// terminal block
 				result.push(new Instruction(Opcode.JUMP));
 				endJumpPos = endJumpPos.map(pos => pos + 1);
 				endJumpPos.push(0);
 				endJumpIndices.push(result.length - 1);
 				break;
-			case Opcode.CURSES_END_IF:
+			case Opcode.TI_FLOW_END_IF:
 				if (chainJumpIndex !== undefined) {
 					// no +1, because no extra jump instruction is generated here
 					result[chainJumpIndex].position = chainJumpPos;
@@ -353,7 +353,7 @@ function convertFC(instructions) {
 				}
 
 				// NOTE to self: if this function returns this array to you,
-				// you should report a parse error
+				// you should report a parse error for too many end-if markers
 				return [i + 1, result];
 			default:
 				chainJumpPos++;
@@ -437,10 +437,10 @@ export default class TerminfoCompiler {
 				case "O": rawResult.push(genOpcode(Opcode.CMP_OR)); break;
 				case "!": rawResult.push(genOpcode(Opcode.CMP_NOT)); break;
 				// flow control markers
-				case "?": rawResult.push(genOpcode(Opcode.CURSES_BEGIN_IF)); break;
-				case "t": rawResult.push(genOpcode(Opcode.CURSES_THEN)); break;
-				case "e": rawResult.push(genOpcode(Opcode.CURSES_ELSE_IF)); break;
-				case ";": rawResult.push(genOpcode(Opcode.CURSES_END_IF)); break;
+				case "?": rawResult.push(genOpcode(Opcode.TI_FLOW_BEGIN_IF)); break;
+				case "t": rawResult.push(genOpcode(Opcode.TI_FLOW_THEN)); break;
+				case "e": rawResult.push(genOpcode(Opcode.TI_FLOW_ELSE_IF)); break;
+				case ";": rawResult.push(genOpcode(Opcode.TI_FLOW_END_IF)); break;
 			}
 		}
 
