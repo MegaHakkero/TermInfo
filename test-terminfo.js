@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import TermInfo from "./terminfo.js";
+import * as TI from "./terminfo.js";
 
 Deno.test({
 	name: "Parse all terminals",
@@ -24,7 +24,7 @@ Deno.test({
 		read: true
 	},
 	fn() {
-		const db = new TermInfo.DB("/usr/share/terminfo");
+		const db = new TI.DB("/usr/share/terminfo");
 		let n = 0, n32bit = 0, nExt = 0;
 
 		for (const term of Object.keys(db.entries)) {
@@ -47,7 +47,7 @@ Deno.test({
 		read: true
 	},
 	fn() {
-		const db   = new TermInfo.DB("/usr/share/terminfo");
+		const db   = new TI.DB("/usr/share/terminfo");
 		const keys = Object.keys(db.entries);
 		for (const term of keys) {
 			const nEntries = keys.filter(n => n === term).length;

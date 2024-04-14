@@ -17,7 +17,8 @@
 
 import Enum from "./enum.js";
 import Caps from "./caps.js";
-import Errors from "./errors.js";
+
+import * as Errors from "./errors.js";
 
 const Magic = Enum(
 	["MAGIC",    0x011A],
@@ -63,7 +64,7 @@ class TermName {
 }
 
 // exports
-class DB {
+export class DB {
 	#populate() {
 		const db = ([...arguments].length < 1) ? this.path : arguments[0];
 		// if arguments[0] is defined, then arguments[1] must also be defined
@@ -108,7 +109,7 @@ class DB {
 	}
 }
 
-class Entry {
+export class Entry {
 	#file;
 	#numWidth;
 
@@ -403,8 +404,3 @@ class Entry {
 		return this.extHeader !== undefined;
 	}
 }
-
-const TermInfo = { DB, Entry };
-Object.freeze(TermInfo);
-
-export default TermInfo;

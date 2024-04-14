@@ -17,6 +17,8 @@
 
 import Enum from './enum.js';
 
+import * as Errors from './errors.js';
+
 const Opcode = Enum(
 	"INVALID",
 	"OUT",
@@ -309,7 +311,7 @@ function convertFC(instructions) {
 		switch (insn.opcode.value) {
 			case Opcode.TI_FLOW_BEGIN_IF: {
 				const [skip, block] = convertFC(instructions.slice(i + 1));
-				if (block === undefined)
+				if (!Array.isArray(block))
 					throw new Errors.ParseError("unexpected end of instructions");
 
 				result.push(...block);
