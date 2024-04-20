@@ -19,7 +19,7 @@ import Enum from './enum.js';
 
 import * as Errors from './errors.js';
 
-const Opcode = Enum(
+export const Opcode = Enum(
 	"INVALID",
 	"OUT",
 	"DELAY",
@@ -80,7 +80,7 @@ const INSN_REGEX = new RegExp([
 	"(?<other_insn>[ilmAO?te;%+*/&|^=><!~-]))"
 ].join("|"), "g");
 
-class Instruction {
+export class Instruction {
 	static #defaults = {
 		[Opcode.OUT]: {
 			str: ""
@@ -119,11 +119,20 @@ class Instruction {
 			position: 0
 		}
 	};
+
+	static opcode(c) {
+		return new Instruction(c).freeze();
+	}
 	
-	constructor(opcode) {
+	constructor(opcode, params) {
 		this.opcode = Opcode(opcode);
 		Object.assign(this, Instruction.#defaults?.[this.opcode.value]);
 		Object.seal(this);
+
+		if (params !== undefined) {
+			Object.assign(this, params);
+			Object.freeze(this);
+		}
 	}
 
 	toString() {
@@ -276,10 +285,6 @@ function genConstant(n) {
 	return insn.freeze();
 }
 
-function genOpcode(code) {
-	return new Instruction(code).freeze();
-}
-
 function inverseMatch(s, matches) {
 	const result = [];
 	let i = 0;
@@ -367,85 +372,82 @@ function convertFC(instructions) {
 	return result;
 }
 
-export default class TerminfoCompiler {
-	// convert raw terminfo string to a list of instructions.
-	// they are not to be executed directly
-	static generateInstructions(s) {
-		const instructions = [...s.matchAll(INSN_REGEX)].map(e => ({
-			match: e[0],
-			index: e.index,
-			groups: e.groups
-		}));
+// convert raw terminfo string to a list of usable instructions
+export function compile(s) {
+	const instructions = [...s.matchAll(INSN_REGEX)].map(e => ({
+		match: e[0],
+		index: e.index,
+		groups: e.groups
+	}));
 
-		const all = instructions.concat(inverseMatch(s, instructions))
-			.sort((a, b) => a.index - b.index);
+	const all = instructions.concat(inverseMatch(s, instructions))
+		.sort((a, b) => a.index - b.index);
 
-		const rawResult = [];
-		
-		for (const insn of all) {
-			if (insn.groups === undefined) {
-				rawResult.push(genOut(insn.match));
-				continue;
-			}
-			if (insn.groups.delay_time !== undefined) {
-				rawResult.push(genDelay(insn.groups));
-				continue;
-			}
-			if (insn.groups.print_format !== undefined) {
-				rawResult.push(genPrint(insn.groups));
-				continue;
-			}
-			if (insn.groups.push_param !== undefined) {
-				rawResult.push(genParam(insn.groups));
-				continue;
-			}
-			if (insn.groups.var_op !== undefined) {
-				rawResult.push(genVar(insn.groups));
-				continue;
-			}
-			if (insn.groups.character !== undefined) {
-				const e = handleEscapes(insn.groups.character);
-				if (e.length > 1)
-					throw new TypeError(`invalid character instruction %'${insn.groups.character}'`);
-				rawResult.push(genConstant(e.charCodeAt(0)));
-				continue;
-			}
-			if (insn.groups.integer !== undefined) {
-				rawResult.push(genConstant(Number(insn.groups.integer)));
-				continue;
-			}
-
-			// other_insn must be set at this point;
-			// the regex doesn't match invalid instructions at all and will ignore them
-			switch (insn.groups.other_insn) {
-				case "%": rawResult.push(genOut("%")); break;
-				case "l": rawResult.push(genOpcode(Opcode.STRLEN)); break;
-				case "i": rawResult.push(genOpcode(Opcode.PARAM_INC)); break;
-				// math
-				case "+": rawResult.push(genOpcode(Opcode.ADD)); break;
-				case "-": rawResult.push(genOpcode(Opcode.SUBTRACT)); break;
-				case "*": rawResult.push(genOpcode(Opcode.MULTIPLY)); break;
-				case "/": rawResult.push(genOpcode(Opcode.DIVIDE)); break;
-				case "m": rawResult.push(genOpcode(Opcode.MODULO)); break;
-				case "&": rawResult.push(genOpcode(Opcode.AND)); break;
-				case "|": rawResult.push(genOpcode(Opcode.OR)); break;
-				case "^": rawResult.push(genOpcode(Opcode.XOR)); break;
-				case "~": rawResult.push(genOpcode(Opcode.NOT)); break;
-				// logical operators
-				case "=": rawResult.push(genOpcode(Opcode.CMP_EQUAL)); break;
-				case ">": rawResult.push(genOpcode(Opcode.CMP_GREATER)); break;
-				case "<": rawResult.push(genOpcode(Opcode.CMP_LESS)); break;
-				case "A": rawResult.push(genOpcode(Opcode.CMP_AND)); break;
-				case "O": rawResult.push(genOpcode(Opcode.CMP_OR)); break;
-				case "!": rawResult.push(genOpcode(Opcode.CMP_NOT)); break;
-				// flow control markers
-				case "?": rawResult.push(genOpcode(Opcode.TI_FLOW_BEGIN_IF)); break;
-				case "t": rawResult.push(genOpcode(Opcode.TI_FLOW_THEN)); break;
-				case "e": rawResult.push(genOpcode(Opcode.TI_FLOW_ELSE_IF)); break;
-				case ";": rawResult.push(genOpcode(Opcode.TI_FLOW_END_IF)); break;
-			}
+	const rawResult = [];
+	
+	for (const insn of all) {
+		if (insn.groups === undefined) {
+			rawResult.push(genOut(insn.match));
+			continue;
+		}
+		if (insn.groups.delay_time !== undefined) {
+			rawResult.push(genDelay(insn.groups));
+			continue;
+		}
+		if (insn.groups.print_format !== undefined) {
+			rawResult.push(genPrint(insn.groups));
+			continue;
+		}
+		if (insn.groups.push_param !== undefined) {
+			rawResult.push(genParam(insn.groups));
+			continue;
+		}
+		if (insn.groups.var_op !== undefined) {
+			rawResult.push(genVar(insn.groups));
+			continue;
+		}
+		if (insn.groups.character !== undefined) {
+			const e = handleEscapes(insn.groups.character);
+			if (e.length > 1)
+				throw new TypeError(`invalid character instruction %'${insn.groups.character}'`);
+			rawResult.push(genConstant(e.charCodeAt(0)));
+			continue;
+		}
+		if (insn.groups.integer !== undefined) {
+			rawResult.push(genConstant(Number(insn.groups.integer)));
+			continue;
 		}
 
-		return convertFC(rawResult);
+		// other_insn must be set at this point;
+		// the regex doesn't match invalid instructions at all and will ignore them
+		switch (insn.groups.other_insn) {
+			case "%": rawResult.push(genOut("%")); break;
+			case "l": rawResult.push(Instruction.opcode(Opcode.STRLEN)); break;
+			case "i": rawResult.push(Instruction.opcode(Opcode.PARAM_INC)); break;
+			// math
+			case "+": rawResult.push(Instruction.opcode(Opcode.ADD)); break;
+			case "-": rawResult.push(Instruction.opcode(Opcode.SUBTRACT)); break;
+			case "*": rawResult.push(Instruction.opcode(Opcode.MULTIPLY)); break;
+			case "/": rawResult.push(Instruction.opcode(Opcode.DIVIDE)); break;
+			case "m": rawResult.push(Instruction.opcode(Opcode.MODULO)); break;
+			case "&": rawResult.push(Instruction.opcode(Opcode.AND)); break;
+			case "|": rawResult.push(Instruction.opcode(Opcode.OR)); break;
+			case "^": rawResult.push(Instruction.opcode(Opcode.XOR)); break;
+			case "~": rawResult.push(Instruction.opcode(Opcode.NOT)); break;
+			// logical operators
+			case "=": rawResult.push(Instruction.opcode(Opcode.CMP_EQUAL)); break;
+			case ">": rawResult.push(Instruction.opcode(Opcode.CMP_GREATER)); break;
+			case "<": rawResult.push(Instruction.opcode(Opcode.CMP_LESS)); break;
+			case "A": rawResult.push(Instruction.opcode(Opcode.CMP_AND)); break;
+			case "O": rawResult.push(Instruction.opcode(Opcode.CMP_OR)); break;
+			case "!": rawResult.push(Instruction.opcode(Opcode.CMP_NOT)); break;
+			// flow control markers
+			case "?": rawResult.push(Instruction.opcode(Opcode.TI_FLOW_BEGIN_IF)); break;
+			case "t": rawResult.push(Instruction.opcode(Opcode.TI_FLOW_THEN)); break;
+			case "e": rawResult.push(Instruction.opcode(Opcode.TI_FLOW_ELSE_IF)); break;
+			case ";": rawResult.push(Instruction.opcode(Opcode.TI_FLOW_END_IF)); break;
+		}
 	}
+
+	return convertFC(rawResult);
 }
