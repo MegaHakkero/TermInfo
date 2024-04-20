@@ -23,7 +23,7 @@ function print(s) {
 }
 
 // printf is not fun to implement. funnily enough, this stack machine
-// has better output formatting support that javascript itself :\
+// has better output formatting support than javascript itself :\
 function printNumericCommon(insn, n, radix, uppercase, prefix) {
 	let s = n.toString(radix);
 	if (uppercase)
