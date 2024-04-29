@@ -162,13 +162,17 @@ export class Program {
 			this.stack.push(this.params[insn.index - 1]);
 		},
 		[Compiler.Opcode.SET_VAR]: insn => {
-			if (insn.name === insn.name.toLowerCase())
+			if (insn.name === insn.name.toLowerCase()) {
 				this.dynamicRegisters[insn.name] = this.#pop();
+				return;
+			}
 			this.#termRef.staticRegisters[insn.name] = this.#pop();
 		},
 		[Compiler.Opcode.PUSH_VAR]: insn => {
-			if (insn.name === insn.name.toLowerCase())
+			if (insn.name === insn.name.toLowerCase()) {
 				this.stack.push(this.dynamicRegisters[insn.name]);
+				return;
+			}
 			this.stack.push(this.#termRef.staticRegisters[insn.name]);
 		},
 		[Compiler.Opcode.CONSTANT]: insn => {
