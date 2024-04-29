@@ -115,7 +115,6 @@ export class Program {
 	#rt = {
 		[Compiler.Opcode.OUT]: insn => {
 			this.output += insn.str;
-			this.programCounter++;
 		},
 		[Compiler.Opcode.DELAY]: insn => {
 			// NOTE: does not handle proportional delay.
@@ -136,7 +135,6 @@ export class Program {
 			// if (!this.#termRef.nullPad) {
 			const until = Date.now() + insn.time;
 			while (Date.now() < until);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.PRINT]: insn => {
 			switch (insn.format) {
@@ -159,117 +157,95 @@ export class Program {
 					this.output += fmts(insn, this.#pop("string"));
 					break;
 			}
-			this.programCounter++;
 		},
 		[Compiler.Opcode.PUSH_PARAM]: insn => {
 			this.stack.push(this.params[insn.index - 1]);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.SET_VAR]: insn => {
 			if (insn.name === insn.name.toLowerCase())
 				this.dynamicRegisters[insn.name] = this.#pop();
 			this.#termRef.staticRegisters[insn.name] = this.#pop();
-			this.programCounter++;
 		},
 		[Compiler.Opcode.PUSH_VAR]: insn => {
 			if (insn.name === insn.name.toLowerCase())
 				this.stack.push(this.dynamicRegisters[insn.name]);
 			this.stack.push(this.#termRef.staticRegisters[insn.name]);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.CONSTANT]: insn => {
 			this.stack.push(insn.value);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.STRLEN]: _ => {
 			this.stack.push(this.#pop("string"));
-			this.programCounter++;
 		},
 		[Compiler.Opcode.PARAM_INC]: _ => {
 			this.params[0]++;
 			this.params[1]++;
-			this.programCounter++;
 		},
 		[Compiler.Opcode.ADD]: _ => {
 			const op1 = this.#pop("number");
 			this.stack.push(this.#pop("number") + op1);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.SUBTRACT]: _ => {
 			const op1 = this.#pop("number");
 			this.stack.push(this.#pop("number") - op1);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.MULTIPLY]: _ => {
 			const op1 = this.#pop("number");
 			this.stack.push(this.#pop("number") * op1);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.DIVIDE]: _ => {
 			const op1 = this.#pop("number");
 			this.stack.push(Math.floor(this.#pop("number") / op1));
-			this.programCounter++;
 		},
 		[Compiler.Opcode.MODULO]: _ => {
 			const op1 = this.#pop("number");
 			this.stack.push(this.#pop("number") % op1);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.AND]: _ => {
 			const op1 = this.#pop("number");
 			this.stack.push(this.#pop("number") & op1);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.OR]: _ => {
 			const op1 = this.#pop("number");
 			this.stack.push(this.#pop("number") | op1);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.XOR]: _ => {
 			const op1 = this.#pop("number");
 			this.stack.push(this.#pop("number") ^ op1);
-			this.programCounter++;
 		},
 		[Compiler.Opcode.NOT]: _ => {
 			this.stack.push(~this.#pop("number"));
-			this.programCounter++;
 		},
 		[Compiler.Opcode.CMP_EQUAL]: _ => {
 			const op1 = this.#pop();
 			this.stack.push(Number(this.#pop() === op1));
-			this.programCounter++;
 		},
 		[Compiler.Opcode.CMP_GREATER]: _ => {
 			const op1 = this.#pop();
 			this.stack.push(Number(this.#pop() > op1));
-			this.programCounter++;
 		},
 		[Compiler.Opcode.CMP_LESS]: _ => {
 			const op1 = this.#pop();
 			this.stack.push(Number(this.#pop() < op1));
-			this.programCounter++;
 		},
 		[Compiler.Opcode.CMP_AND]: _ => {
 			const op1 = this.#pop();
 			this.stack.push(Number(this.#pop() && op1));
-			this.programCounter++;
 		},
 		[Compiler.Opcode.CMP_OR]: _ => {
 			const op1 = this.#pop();
 			this.stack.push(Number(this.#pop() || op1));
-			this.programCounter++;
 		},
 		[Compiler.Opcode.CMP_NOT]: _ => {
 			this.stack.push(Number(!this.#pop()));
-			this.programCounter++;
 		},
 		[Compiler.Opcode.JUMP_ZERO]: insn => {
 			const v = this.#pop();
 			if (v === 0 || v === "")
-				this.programCounter += insn.position + 1;
+				this.programCounter += insn.position;
 		},
 		[Compiler.Opcode.JUMP]: insn => {
-			this.programCounter += insn.position + 1;
+			this.programCounter += insn.position;
 		}
 	};
 
@@ -349,7 +325,7 @@ export class Program {
 
 		this.#rt[insn.opcode.value](insn);
 
-		if (this.programCounter >= this.#code.length)
+		if (++this.programCounter >= this.#code.length)
 			this.done = true;
 	}
 
