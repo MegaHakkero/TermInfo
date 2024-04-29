@@ -35,3 +35,10 @@ export class ParseError extends Error {
 		this.name = "ParseError";
 	}
 }
+
+export class RuntimeError extends Error {
+	constructor() {
+		super(...arguments);
+		this.name = "RuntimeError";
+	}
+}

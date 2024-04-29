@@ -16,6 +16,7 @@
  */
 
 import * as Compiler from './compiler.js';
+import { RuntimeError } from './errors.js';
 
 function checkTerminfoLike(ti) {
 	if (ti?.booleans !== undefined &&
@@ -105,66 +106,181 @@ export class Program {
 	static #regDefaults = Object.fromEntries(new Array(26).fill(0).map((_, i) =>
 		[String.fromCharCode(0x61 + i), null]));
 
+	static #paramDefaults = new Array(9).fill(0);
+
 	#termRef;
+	#hasCode;
 	#code;
 
 	#rt = {
 		[Compiler.Opcode.OUT]: insn => {
-				this.output += insn.str;
-				this.programCounter++;
+			this.output += insn.str;
+			this.programCounter++;
 		},
 		[Compiler.Opcode.DELAY]: insn => {
-				// NOTE: does not handle proportional delay.
-				// ncurses tputs() just takes the affected line count as a
-				// parameter and multiplies the delay time by that
-				// in the case of proportional delays. /shrug
-				// I guess I can come up with something if someone
-				// *actually* uses this library with a real fucking
-				// VT100 and runs into hardware overruns, or something
-				if (!this.#termRef.usePadding && !insn.force)
-					return;
-				
-				// TODO: implement char-based padding when termios is available.
-				// # of characters: (insn.time * BAUDRATE) / 9000;
-				// the character should be either termRef.termInfo.strings.pad_char
-				// or null if undefined.
-				// also remember to check termRef.termInfo.numbers.padding_baud_rate
-				// if (!this.#termRef.nullPad) {
-				const until = Date.now() + insn.time;
-				while (Date.now() < until);
-				this.programCounter++;
+			// NOTE: does not handle proportional delay.
+			// ncurses tputs() just takes the affected line count as a
+			// parameter and multiplies the delay time by that
+			// in the case of proportional delays. /shrug
+			// I guess I can come up with something if someone
+			// *actually* uses this library with a real fucking
+			// VT100 and runs into hardware overruns, or something
+			if (!this.#termRef.usePadding && !insn.force)
+				return;
+			
+			// TODO: implement char-based padding when termios is available.
+			// # of characters: (insn.time * BAUDRATE) / 9000;
+			// the character should be either termRef.termInfo.strings.pad_char
+			// or null if undefined.
+			// also remember to check termRef.termInfo.numbers.padding_baud_rate
+			// if (!this.#termRef.nullPad) {
+			const until = Date.now() + insn.time;
+			while (Date.now() < until);
+			this.programCounter++;
 		},
 		[Compiler.Opcode.PRINT]: insn => {
-				switch (insn.format) {
-					case "c":
-						this.output += String.fromCharCode(this.#pop("number"));
-						break;
-					case "d":
-						this.output += fmtd(insn, this.#pop("number"));
-						break;
-					case "o":
-						this.output += fmto(insn, this.#pop("number"));
-						break;
-					case "x":
-						this.output += fmtx(insn, false, this.#pop("number"));
-						break;
-					case "X":
-						this.output += fmtx(insn, true, this.#pop("number"));
-						break;
-					case "s":
-						this.output += fmts(insn, this.#pop("string"));
-						break;
-				}
-				this.programCounter++;
+			switch (insn.format) {
+				case "c":
+					this.output += String.fromCharCode(this.#pop("number"));
+					break;
+				case "d":
+					this.output += fmtd(insn, this.#pop("number"));
+					break;
+				case "o":
+					this.output += fmto(insn, this.#pop("number"));
+					break;
+				case "x":
+					this.output += fmtx(insn, false, this.#pop("number"));
+					break;
+				case "X":
+					this.output += fmtx(insn, true, this.#pop("number"));
+					break;
+				case "s":
+					this.output += fmts(insn, this.#pop("string"));
+					break;
+			}
+			this.programCounter++;
 		},
 		[Compiler.Opcode.PUSH_PARAM]: insn => {
-				this.stack.push(this.params[insn.index - 1]);
-				this.programCounter++;
+			this.stack.push(this.params[insn.index - 1]);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.SET_VAR]: insn => {
+			if (insn.name === insn.name.toLowerCase())
+				this.dynamicRegisters[insn.name] = this.#pop();
+			this.#termRef.staticRegisters[insn.name] = this.#pop();
+			this.programCounter++;
+		},
+		[Compiler.Opcode.PUSH_VAR]: insn => {
+			if (insn.name === insn.name.toLowerCase())
+				this.stack.push(this.dynamicRegisters[insn.name]);
+			this.stack.push(this.#termRef.staticRegisters[insn.name]);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.CONSTANT]: insn => {
+			this.stack.push(insn.value);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.STRLEN]: _ => {
+			this.stack.push(this.#pop("string"));
+			this.programCounter++;
+		},
+		[Compiler.Opcode.PARAM_INC]: _ => {
+			this.params[0]++;
+			this.params[1]++;
+			this.programCounter++;
+		},
+		[Compiler.Opcode.ADD]: _ => {
+			const op1 = this.#pop("number");
+			this.stack.push(this.#pop("number") + op1);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.SUBTRACT]: _ => {
+			const op1 = this.#pop("number");
+			this.stack.push(this.#pop("number") - op1);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.MULTIPLY]: _ => {
+			const op1 = this.#pop("number");
+			this.stack.push(this.#pop("number") * op1);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.DIVIDE]: _ => {
+			const op1 = this.#pop("number");
+			this.stack.push(Math.floor(this.#pop("number") / op1));
+			this.programCounter++;
+		},
+		[Compiler.Opcode.MODULO]: _ => {
+			const op1 = this.#pop("number");
+			this.stack.push(this.#pop("number") % op1);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.AND]: _ => {
+			const op1 = this.#pop("number");
+			this.stack.push(this.#pop("number") & op1);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.OR]: _ => {
+			const op1 = this.#pop("number");
+			this.stack.push(this.#pop("number") | op1);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.XOR]: _ => {
+			const op1 = this.#pop("number");
+			this.stack.push(this.#pop("number") ^ op1);
+			this.programCounter++;
+		},
+		[Compiler.Opcode.NOT]: _ => {
+			this.stack.push(~this.#pop("number"));
+			this.programCounter++;
+		},
+		[Compiler.Opcode.CMP_EQUAL]: _ => {
+			const op1 = this.#pop();
+			this.stack.push(Number(this.#pop() === op1));
+			this.programCounter++;
+		},
+		[Compiler.Opcode.CMP_GREATER]: _ => {
+			const op1 = this.#pop();
+			this.stack.push(Number(this.#pop() > op1));
+			this.programCounter++;
+		},
+		[Compiler.Opcode.CMP_LESS]: _ => {
+			const op1 = this.#pop();
+			this.stack.push(Number(this.#pop() < op1));
+			this.programCounter++;
+		},
+		[Compiler.Opcode.CMP_AND]: _ => {
+			const op1 = this.#pop();
+			this.stack.push(Number(this.#pop() && op1));
+			this.programCounter++;
+		},
+		[Compiler.Opcode.CMP_OR]: _ => {
+			const op1 = this.#pop();
+			this.stack.push(Number(this.#pop() || op1));
+			this.programCounter++;
+		},
+		[Compiler.Opcode.CMP_NOT]: _ => {
+			this.stack.push(Number(!this.#pop()));
+			this.programCounter++;
+		},
+		[Compiler.Opcode.JUMP_ZERO]: insn => {
+			const v = this.#pop();
+			if (v === 0 || v === "")
+				this.programCounter += insn.position + 1;
+		},
+		[Compiler.Opcode.JUMP]: insn => {
+			this.programCounter += insn.position + 1;
 		}
 	};
 
 	#pop(type) {
+		if (this.stack.length < 1)
+			throw new RuntimeError("stack exhausted");
+
 		const out = this.stack.pop();
+
+		if (type === undefined)
+			return out;
 
 		// extra parentheses to avoid eslint bullshit
 		if ((typeof(out)) !== type)
@@ -173,20 +289,23 @@ export class Program {
 		return out;
 	}
 
-	constructor(termctx) {
+	constructor(termctx, code) {
 		this.#code = [];
-		this.needsStatics = false;
 		this.maxUsedParam = 0;
 		this.terminal = termctx;
 		this.reset();
+
+		if (code !== undefined)
+			this.compile(code);
 	}
 
 	set instructions(insn) {
+		if (this.#hasCode)
+			throw new TypeError("cannot modify existing code. create a new Program instead");
+		this.#hasCode = true;
 		this.#code = insn.slice();
 		Object.freeze(this.#code);
 		for (const insn of this.#code) {
-			if ((insn.opcode.is("SET_VAR") || insn.opcode.is("PUSH_VAR")) && insn.name === insn.name.toUpperCase())
-				this.needsStatics = true;
 			if (insn.opcode.is("PUSH_PARAM") && this.maxUsedParam < insn.index)
 				this.maxUsedParam = insn.index;
 		}
@@ -215,7 +334,7 @@ export class Program {
 		Object.seal(this.dynamicRegisters);
 		this.programCounter = 0;
 		this.stack = [];
-		this.params = [];
+		this.params = Program.#paramDefaults;
 		this.output = "";
 		this.executing = false;
 		this.done = false;
@@ -236,14 +355,12 @@ export class Program {
 
 	begin() {
 		if (!this.executing) {
-			if (this.needsStatics && this.staticRegisters === undefined)
-				throw new TypeError("this program uses static registers, but none are assigned");
 			const parm = [...arguments];
 			if (parm.find(e => (typeof(e) !== "number" && typeof(e) !== "string")))
 				throw new TypeError("attempted to pass parameter of invalid type");
 			if (parm.length < this.maxUsedParam)
 				throw new RangeError(`not enough parameters (${parm.length}) for program using ${this.maxUsedParam} parameters`);
-			this.params = parm;
+			this.params.splice(0, parm.length, ...parm);
 			this.executing = true;
 		}
 	}
@@ -265,14 +382,15 @@ export class Program {
 	}
 }
 
-// roughly equivalent to ncurses TERMINAL structs, but not really
 export class Terminal {
 	static #staticRegDefaults = Object.fromEntries(new Array(26).fill(0).map((_, i) =>
 		[String.fromCharCode(0x41 + i), null]));
 
+	static #tiEmpty = { booleans: {}, numbers: {}, strings: {} };
+
 	#ti;
 
-	constructor(ti = { booleans: {}, numbers: {}, strings: {} }) {
+	constructor(ti = Terminal.#tiEmpty) {
 		this.staticRegisters = Terminal.#staticRegDefaults;
 		Object.seal(this.staticRegisters);
 		this.usePadding = true;
