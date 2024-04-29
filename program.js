@@ -16,15 +16,18 @@
  */
 
 import * as Compiler from './compiler.js';
-import * as TermInfo from './terminfo.js';
 
-function print(s) {
-	Deno.stdout.writeSync(new TextEncoder().encode(s));
+function checkTerminfoLike(ti) {
+	if (ti?.booleans !== undefined &&
+		ti?.numbers !== undefined &&
+		ti?.strings !== undefined)
+		return true;
+	return false;
 }
 
 // printf is not fun to implement. funnily enough, this stack machine
 // has better output formatting support than javascript itself :\
-function printNumericCommon(insn, n, radix, uppercase, prefix) {
+function fmtNumericCommon(insn, n, radix, uppercase, prefix) {
 	let s = n.toString(radix);
 	if (uppercase)
 		s = s.toUpperCase();
@@ -51,57 +54,51 @@ function printNumericCommon(insn, n, radix, uppercase, prefix) {
 	}
 
 	const space = insn.width - (prefix.length + s.length);
-	if (space < 1) {
-		print(prefix + s);
-		return;
-	}
+	if (space < 1)
+		return prefix + s;
 	
-	if (insn.leftJustify) {
-		print(prefix + s + " ".repeat(space));
-		return;
-	}
+	if (insn.leftJustify)
+		return prefix + s + " ".repeat(space);
 
-	if (!insn.zeroPad) {
-		print(" ".repeat(space) + prefix + s);
-		return;
-	}
+	if (!insn.zeroPad)
+		return " ".repeat(space) + prefix + s;
 
-	print(prefix + "0".repeat(space) + s);
+	return prefix + "0".repeat(space) + s;
 }
 
-function printd(insn, n) {
-	printNumericCommon(insn, n, 10, false, "");
+function fmtd(insn, n) {
+	return fmtNumericCommon(insn, n, 10, false, "");
 }
 
-function printo(insn, n) {
+function fmto(insn, n) {
 	let prefix = "";
 	if (insn.alternateForm && n > 0)
 		prefix = "0";
 
-	printNumericCommon(insn, n, 8, false, prefix);
+	return fmtNumericCommon(insn, n, 8, false, prefix);
 }
 
-function printx(insn, uppercase, n) {
+function fmtx(insn, uppercase, n) {
 	let prefix = "";
 	if (insn.alternateForm)
 		prefix = uppercase ? "0X" : "0x";
 	
-	printNumericCommon(insn, n, 16, uppercase, prefix);
+	return fmtNumericCommon(insn, n, 16, uppercase, prefix);
 }
 
-function prints(insn, s) {
+function fmts(insn, s) {
 	if (insn.precision)
 		s = s.slice(0, insn.precision);
 	if (insn.width < 1)
-		print(s);
+		return s;
 	
 	const space = insn.width - s.length;
 
 	if (space < 1)
-		print(s);
+		return s;
 
-	print((insn.leftJustify ? "" : " ".repeat(space)) + s +
-		(insn.leftJustify ? " ".repeat(space) : ""));
+	return (insn.leftJustify ? "" : " ".repeat(space)) + s +
+		(insn.leftJustify ? " ".repeat(space) : "");
 }
 
 export class Program {
@@ -110,6 +107,61 @@ export class Program {
 
 	#termRef;
 	#code;
+
+	#rt = {
+		[Compiler.Opcode.OUT]: insn => {
+				this.output += insn.str;
+				this.programCounter++;
+		},
+		[Compiler.Opcode.DELAY]: insn => {
+				// NOTE: does not handle proportional delay.
+				// ncurses tputs() just takes the affected line count as a
+				// parameter and multiplies the delay time by that
+				// in the case of proportional delays. /shrug
+				// I guess I can come up with something if someone
+				// *actually* uses this library with a real fucking
+				// VT100 and runs into hardware overruns, or something
+				if (!this.#termRef.usePadding && !insn.force)
+					return;
+				
+				// TODO: implement char-based padding when termios is available.
+				// # of characters: (insn.time * BAUDRATE) / 9000;
+				// the character should be either termRef.termInfo.strings.pad_char
+				// or null if undefined.
+				// also remember to check termRef.termInfo.numbers.padding_baud_rate
+				// if (!this.#termRef.nullPad) {
+				const until = Date.now() + insn.time;
+				while (Date.now() < until);
+				this.programCounter++;
+		},
+		[Compiler.Opcode.PRINT]: insn => {
+				switch (insn.format) {
+					case "c":
+						this.output += String.fromCharCode(this.#pop("number"));
+						break;
+					case "d":
+						this.output += fmtd(insn, this.#pop("number"));
+						break;
+					case "o":
+						this.output += fmto(insn, this.#pop("number"));
+						break;
+					case "x":
+						this.output += fmtx(insn, false, this.#pop("number"));
+						break;
+					case "X":
+						this.output += fmtx(insn, true, this.#pop("number"));
+						break;
+					case "s":
+						this.output += fmts(insn, this.#pop("string"));
+						break;
+				}
+				this.programCounter++;
+		},
+		[Compiler.Opcode.PUSH_PARAM]: insn => {
+				this.stack.push(this.params[insn.index - 1]);
+				this.programCounter++;
+		}
+	};
 
 	#pop(type) {
 		const out = this.stack.pop();
@@ -122,8 +174,6 @@ export class Program {
 	}
 
 	constructor(termctx) {
-		// I'm making these public for good will.
-		// mess with them at your own risk
 		this.#code = [];
 		this.needsStatics = false;
 		this.maxUsedParam = 0;
@@ -166,6 +216,7 @@ export class Program {
 		this.programCounter = 0;
 		this.stack = [];
 		this.params = [];
+		this.output = "";
 		this.executing = false;
 		this.done = false;
 	}
@@ -174,64 +225,10 @@ export class Program {
 		if (this.done)
 			return;
 
-		switch (insn.opcode.value) {
-			case Compiler.Opcode.OUT:
-				print(insn.str);
-				this.programCounter++;
-				break;
-			case Compiler.Opcode.DELAY: {
-				// NOTE: does not handle proportional delay.
-				// ncurses tputs() just takes the affected line count as a
-				// parameter and multiplies the delay time by that
-				// in the case of proportional delays. /shrug
-				// I guess I can come up with something if someone
-				// *actually* uses this library with a real fucking
-				// VT100 and runs into hardware overruns, or something
-				if (!this.#termRef.usePadding && !insn.force)
-					return;
-				
-				// TODO: implement char-based padding when termios is available.
-				// # of characters: (insn.time * BAUDRATE) / 9000;
-				// the character should be either termRef.strings.pad_char
-				// or null if undefined.
-				// also remember to check termRef.numbers.padding_baud_rate
-				// if (!this.#termRef.nullPad) {
-				const until = Date.now() + insn.time;
-				while (Date.now() < until);
-				this.programCounter++;
-				break;
-				// }
-			}
-			case Compiler.Opcode.PRINT:
-				switch (insn.format) {
-					case "c":
-						print(String.fromCharCode(this.#pop("number")));
-						break;
-					case "d":
-						printd(insn, this.#pop("number"));
-						break;
-					case "o":
-						printo(insn, this.#pop("number"));
-						break;
-					case "x":
-						printx(insn, false, this.#pop("number"));
-						break;
-					case "X":
-						printx(insn, true, this.#pop("number"));
-						break;
-					case "s":
-						prints(insn, this.#pop("string"));
-						break;
-				}
-				this.programCounter++;
-				break;
-			case Compiler.Opcode.PUSH_PARAM:
-				this.stack.push(this.params[insn.index - 1]);
-				this.programCounter++;
-				break;
-			default:
-				throw new TypeError("Instructions WIP");
-		}
+		if (this.#rt[insn.opcode.value] === undefined)
+			throw new TypeError("Instructions WIP");
+
+		this.#rt[insn.opcode.value](insn);
 
 		if (this.programCounter >= this.#code.length)
 			this.done = true;
@@ -254,13 +251,17 @@ export class Program {
 
 	step() {
 		this.execInstruction(this.#code[this.programCounter]);
+		if (this.done)
+			return this.output;
 	}
 
 	exec() {
 		this.begin.apply(this, [...arguments]);
 		while (!this.done)
 			this.execInstruction(this.#code[this.programCounter]);
+		const out = this.output;
 		this.reset();
+		return out;
 	}
 }
 
@@ -271,7 +272,7 @@ export class Terminal {
 
 	#ti;
 
-	constructor(ti) {
+	constructor(ti = { booleans: {}, numbers: {}, strings: {} }) {
 		this.staticRegisters = Terminal.#staticRegDefaults;
 		Object.seal(this.staticRegisters);
 		this.usePadding = true;
@@ -281,8 +282,8 @@ export class Terminal {
 	}
 
 	set termInfo(ti) {
-		if (ti?.constructor !== TermInfo.Entry)
-			throw new TypeError("please supply a terminfo entry");
+		if (!checkTerminfoLike(ti))
+			throw new TypeError("please supply an object that contains capabilities (see checkTerminfoLike() source)");
 		this.#ti = ti;
 	}
 
