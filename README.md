@@ -8,8 +8,9 @@ Written against ncurses 6.4. Does not support the berkeley database format
 
 ### Instructions
 
-Clone this repo or set it up as a git submodule and import stuff from the
-files. For general use, you want to look at `terminfo.js` and
+If you're reading this on JSR (@marisa/terminfo), you should be good.
+Otherwise, clone this repo or set it up as a git submodule and import stuff
+from the files. For general use, you want to look at `terminfo.js` and
 `program.js`.<br/>
 I might write a higher level API for `program.js` for drawing graphics, like
 ncurses, but for now you'll need to use the low level API.
