@@ -1,6 +1,6 @@
 {
 	"name": "@marisa/terminfo",
-	"version": "0.9.9",
+	"version": "0.9.99",
 	"exports": {
 		".": "./terminfo.js",
 		"./caps": "./caps.js",
