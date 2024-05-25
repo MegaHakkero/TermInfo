@@ -1,0 +1,12 @@
+{
+	"name": "@marisa/terminfo",
+	"version": "0.9.9",
+	"exports": {
+		".": "./terminfo.js",
+		"./caps": "./caps.js",
+		"./compiler": "./compiler.js",
+		"./errors": "./errors.js",
+		"./program": "./program.js",
+		"./terminfo": "./terminfo.js"
+	}
+}
